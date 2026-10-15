@@ -1,0 +1,529 @@
+// Balemuya - Prisma Schema
+// Ethiopian local-service marketplace
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum UserRole {
+  CUSTOMER
+  WORKER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum JobStatus {
+  POSTED
+  QUOTATIONS_RECEIVED
+  WORKER_SELECTED
+  ACCEPTED
+  IN_PROGRESS
+  COMPLETED
+  PAID
+  REVIEWED
+  CANCELLED
+  DISPUTED
+}
+
+enum Urgency {
+  LOW
+  MEDIUM
+  HIGH
+  EMERGENCY
+}
+
+enum QuotationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+  MPESA
+  OTHER
+}
+
+enum NotificationType {
+  JOB_CREATED
+  JOB_REQUEST
+  QUOTATION_SUBMITTED
+  QUOTATION_ACCEPTED
+  QUOTATION_REJECTED
+  JOB_STATUS_CHANGED
+  NEW_MESSAGE
+  JOB_COMPLETED
+  PAYMENT_RECORDED
+  REVIEW_RECEIVED
+  WORKER_VERIFIED
+  ACCOUNT_SUSPENDED
+  SYSTEM
+}
+
+enum AuditAction {
+  LOGIN
+  REGISTER
+  LOGOUT
+  CREATE_JOB
+  UPDATE_JOB
+  DELETE_JOB
+  SUBMIT_QUOTATION
+  ACCEPT_QUOTATION
+  REJECT_QUOTATION
+  CHANGE_JOB_STATUS
+  PAYMENT
+  REVIEW
+  REPORT
+  VERIFY_WORKER
+  SUSPEND_USER
+  UNSUSPEND_USER
+  UPDATE_PROFILE
+  UPDATE_SETTINGS
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWING
+  RESOLVED
+  DISMISSED
+}
+
+enum Availability {
+  AVAILABLE
+  UNAVAILABLE
+  BUSY
+}
+
+// ─────────────────────────────────────────────
+// CORE USER
+// ─────────────────────────────────────────────
+
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  phone        String     @unique
+  fullName     String
+  passwordHash String
+  role         UserRole
+  status       UserStatus @default(ACTIVE)
+  isVerified   Boolean    @default(false)
+  avatarUrl    String?
+  city         String?
+  latitude     Float?
+  longitude    Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customerProfile  CustomerProfile?
+  workerProfile    WorkerProfile?
+  notifications    Notification[]
+  sentMessages     Message[]        @relation("MessageSender")
+  conversations    ConversationParticipant[]
+  auditLogs        AuditLog[]
+  reports          Report[]         @relation("ReporterReports")
+  reportedReports  Report[]         @relation("ReportedReports")
+  blockedUsers     Block[]          @relation("BlockerBlocks")
+  blockedByUsers   Block[]          @relation("BlockedBlocks")
+  passwordResets   PasswordReset[]
+
+  @@index([email])
+  @@index([phone])
+  @@index([role])
+  @@index([status])
+}
+
+model PasswordReset {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+// ─────────────────────────────────────────────
+// PROFILES
+// ─────────────────────────────────────────────
+
+model CustomerProfile {
+  id             String @id @default(uuid())
+  userId         String @unique
+  preferredAreas String[]
+
+  user User  @relation(fields: [userId], references: [id])
+  jobs Job[]
+}
+
+model WorkerProfile {
+  id                 String             @id @default(uuid())
+  userId             String             @unique
+  bio                String?
+  experience         Int                @default(0)  // years
+  startingPrice      Float              @default(0)
+  availability       Availability       @default(AVAILABLE)
+  serviceRadius      Float              @default(10) // km
+  latitude           Float?
+  longitude          Float?
+  city               String?
+  subCity            String?
+  serviceArea        String?
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+  verificationDocType String?
+  verificationRef    String?
+  verificationDate   DateTime?
+  completedJobs      Int                @default(0)
+  averageRating      Float              @default(0)
+  totalEarnings      Float              @default(0)
+  profileCompletion  Int                @default(0)
+
+  user              User               @relation(fields: [userId], references: [id])
+  skills            WorkerSkill[]
+  categories        WorkerCategory[]
+  portfolioImages   PortfolioImage[]
+  quotations        Quotation[]
+  reviews           Review[]
+
+  @@index([availability])
+  @@index([verificationStatus])
+  @@index([latitude, longitude])
+}
+
+// ─────────────────────────────────────────────
+// CATEGORIES & SKILLS
+// ─────────────────────────────────────────────
+
+model ServiceCategory {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  nameAm      String? // Amharic name
+  icon        String?
+  description String?
+  isActive    Boolean @default(true)
+  sortOrder   Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  jobs            Job[]
+  workerCategories WorkerCategory[]
+}
+
+model Skill {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  nameAm      String?
+  categoryId  String?
+
+  workerSkills WorkerSkill[]
+}
+
+model WorkerSkill {
+  id             String @id @default(uuid())
+  workerProfileId String
+  skillId        String
+
+  workerProfile WorkerProfile @relation(fields: [workerProfileId], references: [id])
+  skill         Skill         @relation(fields: [skillId], references: [id])
+
+  @@unique([workerProfileId, skillId])
+}
+
+model WorkerCategory {
+  id              String @id @default(uuid())
+  workerProfileId String
+  categoryId      String
+
+  workerProfile   WorkerProfile   @relation(fields: [workerProfileId], references: [id])
+  category        ServiceCategory @relation(fields: [categoryId], references: [id])
+
+  @@unique([workerProfileId, categoryId])
+}
+
+model PortfolioImage {
+  id              String  @id @default(uuid())
+  workerProfileId String
+  imageUrl        String
+  caption         String?
+  createdAt       DateTime @default(now())
+
+  workerProfile WorkerProfile @relation(fields: [workerProfileId], references: [id])
+}
+
+// ─────────────────────────────────────────────
+// JOBS
+// ─────────────────────────────────────────────
+
+model Job {
+  id                String    @id @default(uuid())
+  customerProfileId String
+  categoryId        String
+  title             String
+  description       String
+  location          String
+  latitude          Float?
+  longitude         Float?
+  city              String?
+  area              String?
+  preferredDate     DateTime?
+  preferredTime     String?
+  budget            Float?
+  urgency           Urgency   @default(MEDIUM)
+  additionalNotes   String?
+  status            JobStatus @default(POSTED)
+  selectedWorkerId  String?   // WorkerProfile.id
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customerProfile CustomerProfile @relation(fields: [customerProfileId], references: [id])
+  category        ServiceCategory @relation(fields: [categoryId], references: [id])
+  images          JobImage[]
+  quotations      Quotation[]
+  conversation    Conversation?
+  payment         Payment?
+  review          Review?
+  reports         Report[]
+
+  @@index([status])
+  @@index([categoryId])
+  @@index([latitude, longitude])
+}
+
+model JobImage {
+  id       String @id @default(uuid())
+  jobId    String
+  imageUrl String
+  createdAt DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id])
+}
+
+// ─────────────────────────────────────────────
+// QUOTATIONS
+// ─────────────────────────────────────────────
+
+model Quotation {
+  id              String          @id @default(uuid())
+  jobId           String
+  workerProfileId String
+  price           Float
+  estimatedTime   String
+  message         String
+  status          QuotationStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  job           Job           @relation(fields: [jobId], references: [id])
+  workerProfile WorkerProfile @relation(fields: [workerProfileId], references: [id])
+
+  @@unique([jobId, workerProfileId])
+  @@index([jobId])
+  @@index([workerProfileId])
+}
+
+// ─────────────────────────────────────────────
+// CHAT / MESSAGING
+// ─────────────────────────────────────────────
+
+model Conversation {
+  id        String   @id @default(uuid())
+  jobId     String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  job          Job?                     @relation(fields: [jobId], references: [id])
+  participants ConversationParticipant[]
+  messages     Message[]
+}
+
+model ConversationParticipant {
+  id             String @id @default(uuid())
+  conversationId String
+  userId         String
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String
+  senderId       String
+  content        String
+  isRead         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  sender       User         @relation("MessageSender", fields: [senderId], references: [id])
+
+  @@index([conversationId])
+}
+
+// ─────────────────────────────────────────────
+// PAYMENTS
+// ─────────────────────────────────────────────
+
+model Payment {
+  id              String        @id @default(uuid())
+  jobId           String        @unique
+  amount          Float
+  workerAmount    Float
+  platformFee     Float
+  commissionRate  Float
+  status          PaymentStatus @default(PENDING)
+  method          PaymentMethod @default(CASH)
+  mpesaRef        String?
+  mpesaReceiptNo  String?
+  paidAt          DateTime?
+  notes           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  job Job @relation(fields: [jobId], references: [id])
+}
+
+// ─────────────────────────────────────────────
+// REVIEWS
+// ─────────────────────────────────────────────
+
+model Review {
+  id              String @id @default(uuid())
+  jobId           String @unique
+  workerProfileId String
+  rating          Int    // 1-5
+  comment         String?
+
+  createdAt DateTime @default(now())
+
+  job           Job           @relation(fields: [jobId], references: [id])
+  workerProfile WorkerProfile @relation(fields: [workerProfileId], references: [id])
+}
+
+// ─────────────────────────────────────────────
+// NOTIFICATIONS
+// ─────────────────────────────────────────────
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  title     String
+  message   String
+  type      NotificationType
+  isRead    Boolean          @default(false)
+  metadata  Json?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([isRead])
+}
+
+// ─────────────────────────────────────────────
+// REPORTS
+// ─────────────────────────────────────────────
+
+model Report {
+  id             String       @id @default(uuid())
+  reporterId     String
+  reportedUserId String?
+  jobId          String?
+  reason         String
+  description    String?
+  status         ReportStatus @default(OPEN)
+  adminNotes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reporter     User  @relation("ReporterReports", fields: [reporterId], references: [id])
+  reportedUser User? @relation("ReportedReports", fields: [reportedUserId], references: [id])
+  job          Job?  @relation(fields: [jobId], references: [id])
+}
+
+// ─────────────────────────────────────────────
+// TRUST & SAFETY
+// ─────────────────────────────────────────────
+
+model Block {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("BlockerBlocks", fields: [blockerId], references: [id])
+  blocked User @relation("BlockedBlocks", fields: [blockedId], references: [id])
+
+  @@unique([blockerId, blockedId])
+}
+
+// ─────────────────────────────────────────────
+// PLATFORM SETTINGS
+// ─────────────────────────────────────────────
+
+model PlatformSetting {
+  id    String @id @default(uuid())
+  key   String @unique
+  value String
+  label String?
+  description String?
+
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// AUDIT LOG
+// ─────────────────────────────────────────────
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  userId     String?
+  action     AuditAction
+  resource   String?
+  resourceId String?
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime    @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
